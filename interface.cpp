@@ -72,11 +72,11 @@ extern "C" {
     pyintp->set_dict_object(py_mod_dict, py_node, "my_node");
 
     // extract MPI communicator
-    int comm_id = n["mpi_comm"].as_int();
-    MPI_Comm comm = MPI_Comm_f2c(comm_id);
-    int myid = 0;
-    int ierr = MPI_Comm_rank(comm, &myid);
-    cout << "mpi_comm = " << comm_id << " myid = " << myid << endl;
+    //int comm_id = n["mpi_comm"].as_int();
+    //MPI_Comm comm = MPI_Comm_f2c(comm_id);
+    //int myid = 0;
+    //int ierr = MPI_Comm_rank(comm, &myid);
+    //cout << "mpi_comm = " << comm_id << " myid = " << myid << endl;
 
     // read Python script and broadcase to all procs
     //Node n_py_src;

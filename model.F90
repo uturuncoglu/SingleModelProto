@@ -159,7 +159,7 @@ module MODEL
       file=__FILE__)) &
       return  ! bail out
 
-    call GridToNode(gridOut, vm, rc)
+    !call GridToNode(gridOut, vm, rc)
 
 #ifdef WITHIMPORTFIELDS
     ! importable field: sea_surface_temperature
@@ -183,11 +183,23 @@ module MODEL
       line=__LINE__, &
       file=__FILE__)) &
       return  ! bail out
+    call ESMF_FieldFill(field, dataFillScheme="sincos", rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
+    call ESMF_FieldWrite(field, "field_pmsl.nc", variableName="pmsl", overwrite=.true., rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
     call NUOPC_Realize(exportState, field=field, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, &
       file=__FILE__)) &
       return  ! bail out
+
+    call AddFieldToNode(field, vm, rc=rc)    
 
     ! exportable field: surface_net_downward_shortwave_flux
     field = ESMF_FieldCreate(name="rsns", grid=gridOut, &

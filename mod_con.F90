@@ -15,6 +15,7 @@ module MOD_CON
   private
 
   public GridToNode
+  public AddFieldToNode
 
   !-----------------------------------------------------------------------------
   contains
@@ -141,5 +142,57 @@ module MOD_CON
     !call conduit_node_destroy(cnode)
 
   end subroutine GridToNode
+
+  subroutine AddFieldToNode(field, vm, rc)
+    type(ESMF_Field), intent(in) :: field
+    type(ESMF_VM), intent(in) :: vm
+    integer, intent(out) :: rc
+
+    ! local variables
+    type(C_PTR) :: cnode
+    integer :: comm, localPet, petCount, dimCount
+    integer :: localElementCount(2)
+    character(ESMF_MAXSTR) :: fname
+    type(ESMF_TypeKind_Flag) :: typekind
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+
+    ! get comm world
+    call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, &
+         mpiCommunicator=comm, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
+
+    ! query type of field
+    call ESMF_FieldGet(field, name=fname, typekind=typekind, dimCount=dimCount, localElementCount=localElementCount, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, &
+        file=__FILE__)) &
+        return  ! bail out
+
+    ! get pointer out of field
+    if (typekind == ESMF_TYPEKIND_R8) then
+      call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+          line=__LINE__, &
+          file=__FILE__)) &
+          return  ! bail out
+    end if
+
+    !print*, lbound(fptr, dim=1), ubound(fptr, dim=1), lbound(fptr, dim=2), ubound(fptr, dim=2)
+    !print*, localElementCount
+
+    ! create node
+    cnode = conduit_node_create()
+
+    call conduit_node_set_path_int32(cnode, "mpi_comm", comm)
+    call conduit_node_set_path_int32_ptr(cnode, "shape", localElementCount, int8(dimCount))
+    call conduit_node_set_path_float64_ptr(cnode, trim(fname), fptr, int8(product(localElementCount, dim=1)))
+
+    ! pass node to Python
+    call conduit_fort_to_py(cnode)
+
+  end subroutine AddFieldToNode
 
 end module MOD_CON
