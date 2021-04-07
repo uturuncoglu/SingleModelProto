@@ -15,7 +15,9 @@ module MOD_CON
   private
 
   public GridToNode
-  public AddFieldToNode
+  public FieldToNode
+  public NodeToField
+  public FieldUpdateByPython
 
   !-----------------------------------------------------------------------------
   contains
@@ -143,7 +145,7 @@ module MOD_CON
 
   end subroutine GridToNode
 
-  subroutine AddFieldToNode(field, vm, rc)
+  subroutine FieldToNode(field, vm, rc)
     type(ESMF_Field), intent(in) :: field
     type(ESMF_VM), intent(in) :: vm
     integer, intent(out) :: rc
@@ -151,7 +153,7 @@ module MOD_CON
     ! local variables
     type(C_PTR) :: cnode
     integer :: comm, localPet, petCount, dimCount
-    integer :: localElementCount(2)
+    integer :: elementCount(2), localElementCount(2)
     character(ESMF_MAXSTR) :: fname
     type(ESMF_TypeKind_Flag) :: typekind
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
@@ -165,7 +167,8 @@ module MOD_CON
       return  ! bail out
 
     ! query type of field
-    call ESMF_FieldGet(field, name=fname, typekind=typekind, dimCount=dimCount, localElementCount=localElementCount, rc=rc)
+    call ESMF_FieldGet(field, name=fname, typekind=typekind, dimCount=dimCount, &
+         elementCount=elementCount, localElementCount=localElementCount, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
         line=__LINE__, &
         file=__FILE__)) &
@@ -180,19 +183,141 @@ module MOD_CON
           return  ! bail out
     end if
 
-    !print*, lbound(fptr, dim=1), ubound(fptr, dim=1), lbound(fptr, dim=2), ubound(fptr, dim=2)
-    !print*, localElementCount
-
     ! create node
     cnode = conduit_node_create()
 
     call conduit_node_set_path_int32(cnode, "mpi_comm", comm)
-    call conduit_node_set_path_int32_ptr(cnode, "shape", localElementCount, int8(dimCount))
+    call conduit_node_set_path_int32_ptr(cnode, "global_shape", elementCount, int8(dimCount))
+    call conduit_node_set_path_int32_ptr(cnode, "local_shape", localElementCount, int8(dimCount))
     call conduit_node_set_path_float64_ptr(cnode, trim(fname), fptr, int8(product(localElementCount, dim=1)))
 
     ! pass node to Python
     call conduit_fort_to_py(cnode)
+    !call conduit_node_print(cnode)
 
-  end subroutine AddFieldToNode
+    ! return updated data
+    call NodeToField(field, vm, rc)
+
+  end subroutine FieldToNode
+
+  subroutine NodeToField(field, vm, rc)
+    type(ESMF_Field), intent(in) :: field
+    type(ESMF_VM), intent(in) :: vm
+    integer, intent(out) :: rc
+
+    ! local variables
+    type(C_PTR) :: cnode
+    integer :: localPet, petCount, dimCount
+    integer :: localElementCount(2)
+    character(ESMF_MAXSTR) :: fname
+    !type(ESMF_TypeKind_Flag) :: typekind
+    real(8), pointer :: fptr1d(:)
+    real(ESMF_KIND_R8), pointer :: fptr2d(:,:)
+
+    ! get comm world
+    call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
+
+    ! query type of field
+    call ESMF_FieldGet(field, name=fname, dimCount=dimCount, localElementCount=localElementCount, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, &
+        file=__FILE__)) &
+        return  ! bail out
+
+    ! get node from Python
+    cnode = conduit_fort_from_py(trim(fname))
+    !call conduit_node_print_detailed(cnode)
+
+    ! get pointer out of node
+    call conduit_node_fetch_path_as_float64_ptr(cnode,"data",fptr1d)
+    
+    ! reshape pointer
+    write(*,fmt='(A,3I8)') "ptr1d => ", localPet, lbound(fptr1d, dim=1), ubound(fptr1d, dim=1)
+    write(*,fmt='(A,3I8)') "ptr2d => ", localPet, localElementCount
+    !write(*,fmt='(A,I8,F20.15)') "ptr1d => ", localPet, fptr1d(int((ubound(fptr1d, dim=1)-lbound(fptr1d, dim=1)+1)/2))
+    !fptr2d(1:localElementCount(1),1:localElementCount(2)) => fptr1d
+
+    ! update ESMF field
+    call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, &
+        file=__FILE__)) &
+        return  ! bail out
+    fptr2d(1:localElementCount(1),1:localElementCount(2)) => fptr1d
+
+  end subroutine NodeToField
+
+  subroutine FieldUpdateByPython(field, vm, rc)
+    type(ESMF_Field), intent(in) :: field
+    type(ESMF_VM), intent(in) :: vm
+    integer, intent(out) :: rc
+
+    ! local variables
+    type(C_PTR) :: cnode_send, cnode_recv
+    integer :: i, j, k, comm, localPet, petCount, dimCount
+    integer :: elementCount(2), localElementCount(2)
+    character(ESMF_MAXSTR) :: fname
+    type(ESMF_TypeKind_Flag) :: typekind
+    real(ESMF_KIND_R8), pointer :: fptr1d(:), fptr2d(:,:)
+
+    ! get comm world
+    call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, &
+         mpiCommunicator=comm, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
+ 
+    ! query type of field
+    call ESMF_FieldGet(field, name=fname, typekind=typekind, dimCount=dimCount, &
+         elementCount=elementCount, localElementCount=localElementCount, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, &
+        file=__FILE__)) &
+        return  ! bail out
+
+    ! get pointer out of field
+    if (typekind == ESMF_TYPEKIND_R8) then
+      call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+          line=__LINE__, &
+          file=__FILE__)) &
+          return  ! bail out
+    end if
+
+    ! create node
+    cnode_send = conduit_node_create()
+
+    ! add information to node
+    call conduit_node_set_path_int32(cnode_send, "mpi_comm", comm)
+    call conduit_node_set_path_int32_ptr(cnode_send, "global_shape", elementCount, int8(dimCount))
+    call conduit_node_set_path_int32_ptr(cnode_send, "local_shape", localElementCount, int8(dimCount))
+    call conduit_node_set_path_float64_ptr(cnode_send, trim(fname), fptr2d, int8(product(localElementCount, dim=1)))
+
+    ! interact with Python
+    cnode_recv = conduit_interact(cnode_send, trim(fname))
+
+    ! get pointer out of node
+    call conduit_node_fetch_path_as_float64_ptr(cnode_recv, "data", fptr1d)
+
+    ! update ESMF field
+    !write(*,fmt='(A,I8,F20.16,I8)') "ptr1d => ", localPet, fptr1d(int((ubound(fptr1d, dim=1)-lbound(fptr1d, dim=1)+1)/2)), int((ubound(fptr1d, dim=1)-lbound(fptr1d, dim=1)+1)/2)
+    !fptr2d(1:localElementCount(1),1:localElementCount(2)) => fptr1d
+    write(*,fmt='(A,3I8)') "ptr1d => ", localPet, lbound(fptr1d, dim=1), ubound(fptr1d, dim=1)
+    write(*,fmt='(A,5I8)') "ptr2d => ", localPet, lbound(fptr2d, dim=1), ubound(fptr2d, dim=1), lbound(fptr2d, dim=2), ubound(fptr2d, dim=2)
+
+    k = 1
+    do j = lbound(fptr2d, dim=2), ubound(fptr2d, dim=2) 
+    do i = lbound(fptr2d, dim=1), ubound(fptr2d, dim=1)
+      fptr2d(i,j) = fptr1d(k)
+      k = k+1
+    end do
+    end do
+
+  end subroutine FieldUpdateByPython
 
 end module MOD_CON

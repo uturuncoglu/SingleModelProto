@@ -69,64 +69,87 @@ extern "C" {
     PyObject *py_node = PyConduit_Node_Python_Wrap(&n,
                                                    0); // python owns => false
 
-    pyintp->set_dict_object(py_mod_dict, py_node, "my_node");
+    // my_node is set in here statically, it will be used to access node under python
+    pyintp->set_dict_object(py_mod_dict, py_node, "my_node"); 
 
-    // extract MPI communicator
-    //int comm_id = n["mpi_comm"].as_int();
-    //MPI_Comm comm = MPI_Comm_f2c(comm_id);
-    //int myid = 0;
-    //int ierr = MPI_Comm_rank(comm, &myid);
-    //cout << "mpi_comm = " << comm_id << " myid = " << myid << endl;
-
-    // read Python script and broadcase to all procs
-    //Node n_py_src;
-    //if (myid == 0) {
-    //  ostringstream py_src;
-    //  string script_fname = "process.py";
-    //  ifstream ifs(script_fname.c_str());
-    //  if (ifs.is_open()) {
-    //    py_src << "# script from: " << script_fname << std::endl;
-    //    copy(istreambuf_iterator<char>(ifs),
-    //         istreambuf_iterator<char>(),
-    //         ostreambuf_iterator<char>(py_src));
-    //    n_py_src.set(py_src.str());
-    //    ifs.close();
-    //  }
-    //}
-
-    //relay::mpi::broadcast_using_schema(n_py_src, 0, comm);
-
-    //n_py_src["source"] = n_py_src;
-
-    // create py object to wrap the conduit node
-    //PyObject *py_node = PyConduit_Node_Python_Wrap(&n_py_src,
-    //                                               0); // python owns => false
-
-    //
-    // NOTE: we aren't checking pyintp->run_script return to simplify
-    //       this example -- but you should check in real cases!
-    //bool err = pyintp->run_script("print('Hello from Python, here is what you passed:')");
-    //cout << err << endl;
-    //if (err) {
-    //  CONDUIT_ERROR(pyintp->error_message());
-    //}
-    //pyintp->run_script("print(my_node)");
-    //pyintp->run_script("vals_view = my_node['values'].reshape(my_node['shape'])");
-    //pyintp->run_script("print(vals_view)");
-
-    //pyintp->run_script("import conduit");
-    // m_running need to be true to see the output, it is in PythonInterpreter
+    // trigger script
     bool err = pyintp->run_script_file("process.py", py_mod_dict);
-    //cout << emsg << endl;
-    //pyintp->error_message();
-    //bool err = pyintp->run_script(n_py_src["source"] , py_mod_dict);
-
-    //string script = "from mpi4py import MPI;comm = MPI.COMM_WORLD;rank = comm.Get_rank();print(rank)";
-    //int result = PyRun_SimpleString((char*)script.c_str());
-    //cout<< "hoho"<< endl;
-
-    // Finalize Python Interpreter
-    //Py_Finalize();
   }
 
+  //-----------------------------------------------------------------------------
+  // access node passed from python to fortran 
+  //----------------------------------------------------------------------------
+  conduit_node* conduit_fort_from_py(const char *py_name) {
+    // create python interpreter
+    PythonInterpreter *pyintp = init_python_interpreter();
+
+    // trigger script
+    bool err = pyintp->run_script_file("process.py");
+
+    //std::cout << "py_name = " << py_name << std::endl;
+    //std::ostringstream oss;
+    //oss << py_name << " = conduit.Node()" << std::endl
+    //    << "data = np.array(range(10), dtype='float64')" << std::endl
+    //    << py_name << "['data'].set_external(data)" << std::endl
+    //    << "print('Hello from python, I created:')" << std::endl
+    //    << "print(" << py_name << ")" << std::endl;
+
+    //pyintp->run_script(oss.str());
+
+    // get global dict and fetch wrapped conduit node
+    PyObject *py_mod_dict =  pyintp->global_dict();
+
+    // create py object to get the conduit node
+    PyObject *py_obj = pyintp->get_dict_object(py_mod_dict,
+                                               py_name);
+
+    // check error if requested conduit node does not exist
+    if (!PyConduit_Node_Check(py_obj)) {
+      //std::cout << "failed to access " << py_name << std::endl;
+      //return NULL;;
+    }
+
+    // get cpp ref from python node
+    conduit::Node *cpp_res = PyConduit_Node_Get_Node_Ptr(py_obj);
+
+    // return the c pointer
+    return conduit::c_node(cpp_res);
+  }
+
+  //----------------------------------------------------------------------------
+  // send & recv 
+  //----------------------------------------------------------------------------
+  conduit_node* conduit_interact(conduit_node *data, const char *py_name) {
+    // create python interpreter
+    PythonInterpreter *pyintp = init_python_interpreter();
+
+    // get global dict and insert wrapped conduit node
+    PyObject *py_mod_dict =  pyintp->global_dict();
+
+    // get cpp ref to passed node
+    conduit::Node &n = conduit::cpp_node_ref(data);
+
+    // create py object to wrap the conduit node
+    PyObject *py_node = PyConduit_Node_Python_Wrap(&n,
+                                                   0); // python owns => false
+
+    // my_node is set in here statically, it will be used to access node under python
+    pyintp->set_dict_object(py_mod_dict, py_node, "my_node");
+
+    // trigger script
+    bool err = pyintp->run_script_file("process.py", py_mod_dict);
+
+    // get global dict and fetch wrapped conduit node
+    py_mod_dict =  pyintp->global_dict();
+
+    // create py object to get the conduit node
+    PyObject *py_obj = pyintp->get_dict_object(py_mod_dict,
+                                               py_name);
+
+    // get cpp ref from python node
+    conduit::Node *cpp_res = PyConduit_Node_Get_Node_Ptr(py_obj);
+
+    // return the c pointer
+    return conduit::c_node(cpp_res);
+  }
 }

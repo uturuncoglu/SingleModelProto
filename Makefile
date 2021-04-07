@@ -125,4 +125,4 @@ edit:
 	nedit mainApp.F90 driver.F90 model.F90 &
 
 run:
-	mpirun -np 4 ./mainApp
+	mpiexec_mpt -np 4 ./mainApp

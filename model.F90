@@ -183,23 +183,42 @@ module MODEL
       line=__LINE__, &
       file=__FILE__)) &
       return  ! bail out
+
+    ! fill field
     call ESMF_FieldFill(field, dataFillScheme="sincos", rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, &
       file=__FILE__)) &
       return  ! bail out
-    call ESMF_FieldWrite(field, "field_pmsl.nc", variableName="pmsl", overwrite=.true., rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, &
-      file=__FILE__)) &
-      return  ! bail out
+
     call NUOPC_Realize(exportState, field=field, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, &
       file=__FILE__)) &
       return  ! bail out
 
-    call AddFieldToNode(field, vm, rc=rc)    
+    ! write original field
+    call ESMF_FieldWrite(field, "field_pmsl_org.nc", variableName="pmsl", overwrite=.true., rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
+ 
+    ! put field to node
+    !call FieldToNode(field, vm, rc=rc)    
+
+    ! get updated field from python
+    !call NodeToField(field, vm, rc=rc)
+
+    ! update field, fortran -> python / modify / python -> fortran
+    call FieldUpdateByPython(field, vm, rc=rc) 
+
+    ! write updated field
+    call ESMF_FieldWrite(field, "field_pmsl_upd.nc", variableName="pmsl", overwrite=.true., rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, &
+      file=__FILE__)) &
+      return  ! bail out
 
     ! exportable field: surface_net_downward_shortwave_flux
     field = ESMF_FieldCreate(name="rsns", grid=gridOut, &
